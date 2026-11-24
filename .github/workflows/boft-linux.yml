@@ -1,0 +1,55 @@
+name: boft-linux
+
+# Boft's build of cortendesk-server at the tag this branch starts from: the x86_64 static (musl) binaries only,
+# as upstream's release workflow builds them, with Rust and cross pinned so a rerun gives the same tools.
+# Manual runs only; nothing runs on a push. See BOFT.md.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.99.1
+  CROSS_REV: a9301e91f72bba3850460512685f6b16062015ff
+  TARGET: x86_64-unknown-linux-musl
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Rust ${{ env.RUST_VERSION }}
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target "$TARGET"
+          rustup default "$RUST_VERSION"
+          rustc --version
+
+      - name: cross at ${{ env.CROSS_REV }}
+        run: cargo install cross --git https://github.com/cross-rs/cross --rev "$CROSS_REV" --locked
+
+      - name: Build
+        run: cross build --release --locked --all-features --target "$TARGET"
+
+      - name: Collect
+        run: |
+          mkdir -p out
+          cp target/$TARGET/release/{hbbs,hbbr,cortendesk-utils} out/
+          chmod +x out/*
+          git rev-parse HEAD > out/COMMIT
+          git -C libs/hbb_common rev-parse HEAD > out/HBB_COMMON
+          rustc --version > out/RUSTC
+          (cd out && sha256sum hbbs hbbr cortendesk-utils > SHA256SUMS)
+          cat out/SHA256SUMS out/COMMIT out/HBB_COMMON out/RUSTC
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boft-cortendesk-server-linux-amd64
+          path: out
+          if-no-files-found: error
+          retention-days: 30
